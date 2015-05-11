@@ -1,22 +1,40 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
 import vtk
 from vtk.numpy_interface import dataset_adapter as dsa
 from vtk.numpy_interface import algorithms as algs 
 import numpy as np
+import os
 
-#t0,tf = 0,0.1
+#start time
 t0 = 10
+# end time
 tf = 11.026
-filename = r'150cylinder13W.foam'
+# working directory
+wd = '/home/wei/Wu/VortexStreet/New/150cylinder13Wrerun'
+# filename
+filename = '150cylinder13W.foam'
+# name of field to be decomposed
 fieldname = 'p'
-# filename,fieldname = '.foam','T'
+# accuracy determines how many modes will be calculated.
 accuracy = 0.9999
-prefix = 'volume_weighted_no_avg_substraction'
+# prefix of all output file of generated data
+prefix = 'volume_weighted_no_avg_substraction_'
+# some switch
+# True: read data from case files; False: read data from fields.npz
 readField = True
+#
 subtractAvg = False
+#
 useVolWeight = True
 
+
+os.chdir(wd)
+print 'change to working directory:',wd
 ofr = vtk.vtkPOpenFOAMReader()
 ofr.SetFileName(filename)
+print 'reading case: ',filename
 #Set and get case type. 0 = decomposed case, 1 = reconstructed case.
 ofr.SetCaseType(1) 
 #for reading point/face/cell-Zones
@@ -30,6 +48,7 @@ ofr.SetCreateCellToPoint(0)
 #只读取fieldname对应的数据
 ofr.DisableAllCellArrays()
 ofr.SetCellArrayStatus(fieldname,1)
+print 'reading field: ',fieldname
 #更新数据
 ofr.Update()
 
@@ -38,7 +57,13 @@ times = dsa.vtkDataArrayToVTKArray( ofr.GetTimeValues() ,ofr)
 #选择时间数据
 times = [t for t in times if t>=t0 and t<=tf]
 N = len(times)
-
+print 'number of timesteps: ',N
+print 'timesteps:',times
+# test if times are evenly spaced.
+if std(times[1:]-times[:-1])/average(times[1:]-times[:-1])> 1e-5:
+    raise ValueError( 'The times are not evenly spaced!\nquit!')
+    exit()
+    
 #利用vtkCellQuality Filter来计算单元体积
 cq = vtk.vtkCellQuality()
 #cq承接从ofr传来的输出
@@ -73,6 +98,7 @@ if readField:
         field = d.CellData[fieldname]
         #get the first component of composite dataset, it is the internalField
         fields[i]=np.copy(field.Arrays[0])
+        assert np.any(np.isnan(fields[i])) == False
 
     #存一个数据出来看看
     #ofr.GetOutputDataObject(0).GetBlock(0).GetCellData().GetArray(0).GetValue(0)    

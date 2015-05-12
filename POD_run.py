@@ -15,7 +15,9 @@ tf = 11.026
 # working directory
 wd = '/home/wei/Wu/VortexStreet/New/150cylinder13Wrerun/'
 # output directory
-od = '/media/seagate_d4/catdog/POD_output/'+time.ctime()+'/'
+od = 'reconstruct_10_timesteps/'
+odd = '/media/seagate_d4/catdog/POD_output/'+time.ctime()
+od = odd.replace(' ','_').replace(':','_')+od
 # filename of input openfoam case
 filename = '150cylinder13W.foam'
 # name of field to be decomposed
@@ -23,19 +25,26 @@ fieldname = 'p'
 # accuracy determines how many modes will be calculated.
 accuracy = 0.9999
 # prefix of all output file of generated data
-prefix = 'volume_weighted_no_avg_substraction'
+prefix = 'unweighted_no_avg_substraction'
 # spatial mode to be calculated, M==0 means determined by program according to accuracy
 M = 0
 # some switch
 # True: read data from case files; False: read data from fields.npz
-readField = True
-datafilename = '/home/wei/Wu/VortexStreet/New/150cylinder13Wrerun/field_p.npz'
+readField = False
+datafilename = '/home/wei/Wu/VortexStreet/New/150cylinder13Wrerun/fields_p.npz'
 #
 subtractAvg = False
 #
-useVolWeight = True
+useVolWeight = False
+#
+doReconstruction = True
+MR = 10 #选10个点输出
+#
+output_correlation_matrix = True
 
 
+if not os.path.exists(od):
+    os.makedirs(od)
 os.chdir(wd)
 print 'change to working directory:',wd
 ofr = vtk.vtkPOpenFOAMReader()
@@ -139,10 +148,12 @@ for i,j in cwr(range(N),2):
     if useVolWeight:
         C[i,j] = np.einsum('i,i,i',fields[i],fields[j],V)
     else:
-        C[i,j] = np.dot(fields[i],fields[j])
+        C[i,j] = np.dot(fields[i],fields[j])/L
     print "correlation coeff.({},{}) calculated".format(i,j)
     if i != j:
         C[j,i] = C[i,j]
+if output_correlation_matrix == True:
+    np.savetxt(od+prefix+'_correlation_matrix.csv',C,delimiter = ',',header = 'correlation matrix')
 
 # 采用对称矩阵的特征值求解器
 from numpy.linalg import eigh
@@ -202,6 +213,15 @@ for i in range(M):
 #把平均场也加进去
 ugcd.AddArray(dsa.numpyTovtkDataArray(field_avg,'field_{}_avg'.format(fieldname)))
     
+# 如果需要，再来点儿重构的场
+if doReconstruction == True:
+    #选择重构MR个重构时间点
+    indR = range(0,len(times),len(times)/MR+1)
+    timesR = times[indR]
+    fieldsR = np.zeros([MR,L])
+    for i in range(MR):
+        fieldsR[i] = np.einsum('i,i,ij',eVec[:M,indR[i]],sv[:M],Modes[:M]) #前M个模态及奇异值相加
+        ugcd.AddArray(dsa.numpyTovtkDataArray(fieldsR[i],prefix+'_reconstructed_{}_MR{}_t{}'.format(fieldname,MR,timesR[i])))
 # 用writer写出来
 ugw = vtk.vtkXMLUnstructuredGridWriter()
 ugw.SetInputDataObject(ug)
@@ -216,5 +236,6 @@ ugw.SetDataModeToBinary()
 ugw.SetCompressorTypeToZLib()
 #写
 ugw.Write()
+
 print 'END'
 

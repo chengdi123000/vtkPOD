@@ -1,7 +1,8 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-
-execfile('10_12s.py')
+import sys
+#load parameters
+execfile(sys.argv[1])
 
 def main(argv):
     import vtk
@@ -18,9 +19,9 @@ def main(argv):
     if not read_fields_from_file:    
 
         ### Readin stage
-
-
+        # using parallel openfoam reader
         ofr = vtk.vtkPOpenFOAMReader()
+        # set reader's options 
         ofr.SetFileName(ID+IF)
         ofr.SetDecomposePolyhedra(0)
         ofr.CacheMeshOn()
@@ -29,60 +30,73 @@ def main(argv):
         ofr.SetCellArrayStatus(fieldname,1)
         ofr.Update()
 
+        # VTKArray is same as numpy array
         times = dsa.vtkDataArrayToVTKArray( ofr.GetTimeValues() ,ofr)
+        # select the timestep between t0 and tf
         times = [t for t in times if t>=t0 and t<=tf]
         N = len(times)
         np.save(times_filename,times)
 
+        # using CellQuality to get cell's volumes as weight
         cq = vtk.vtkCellQuality()
         cq.SetInputConnection(0,ofr.GetOutputPort(0))
         cq.SetQualityMeasureToVolume()
         cq.Update()
+        # cq is a composite dataset so I need GetBlock(0)
         geom = cq.GetOutputDataObject(0).GetBlock(0)
 
+        # get volumes of cells V, size = L (number of cells)
         V = np.copy(dsa.WrapDataObject(geom).CellData['CellQuality'])
-        for i in range(geom.GetCellData().GetNumberOfArrays()):
-            geom.GetCellData().RemoveArray(0)
-        #导入POD模态数据
+        # normalize it as weight 
         Vtotal = sum(V)
         V /= Vtotal
+        
+        # delete all other CellDataArray in geom DataSet, preserve its mesh structure and topology structure
+        for i in range(geom.GetCellData().GetNumberOfArrays()):
+            geom.GetCellData().RemoveArray(0)
+        # add volume weight to it for saving
         geom.GetCellData().AddArray(dsa.numpyTovtkDataArray(V,'vol_weight'))
-        #get size of the each snapshot
 
+        # using *.vtu file format to save the vol_weight
         ugw = vtk.vtkXMLUnstructuredGridWriter()
         ugw.SetInputDataObject(geom)
-        print 'Output to file: ',geom_filename
+        print 'Output vol_weight to file: ',geom_filename
         ugw.SetFileName(geom_filename)
-        # 默认是ascii格式，特别大！
-        #ugw.SetDataModeToAscii()
+        # using binary format
         ugw.SetDataModeToBinary()
-        #启用压缩
+        # enable compression
         ugw.SetCompressorTypeToZLib()
-        #写
+        # write to the file
         ugw.Write()
-        #disconnect cq and ofr
+        # disconnect cq and ofr in order to isolate this dataset object from Update()
         cq.RemoveAllInputConnections(0)
 
-        L = V.size
-        N = len(times)
-        fields = np.zeros([N,L])
+        L = V.size # number of cells
+        N = len(times) #number of timesteps
+        # vector data is larger in size
+        if field_is_vector == True:
+            fields = np.zeros([N,L,3])
+        else:
+            fields = np.zeros([N,L])
         pipepout = ofr
         for i in range(N):
             t = times[i]
             print 'reading time:{}'.format(t)
-            #set time value
+            # set time value
             pipepout.GetOutputInformation(0).Set(vtk.vtkStreamingDemandDrivenPipeline.UPDATE_TIME_STEP(),t)
+            # read in field data of new timestep
             pipepout.Update()
+            # 
             d = dsa.WrapDataObject(pipepout.GetOutput().GetBlock(0))
             print 'reading field:{}'.format(fieldname)
             field = d.CellData[fieldname]
-            #get the first component of composite dataset, it is the internalField
+            # get the first component of composite dataset, it is the internalField
             fields[i]=np.copy(field)
 
-        #存储数据，读取数据
+        # write data to file
         print 'write field data to file:',fields_filename
         np.savez(fields_filename,fields)
-    else:
+    else: #read fields from file
         fields = np.load(fields_filename)['arr_0']
         
         ugr = vtk.vtkXMLUnstructuredGridReader()
@@ -109,7 +123,22 @@ def main(argv):
     import modred as mr
     
     if do_POD:
+        # if field is a vector, reshape the fields and corresponding volument weight
+        if field_is_vector:
+            shp_vec = fields.shape
+            shp_flat = (fields.shape[0],fields.shape[1]*fields.shape[2])
+            fields = fields.reshape(shp_flat)
+            V = np.tile(V,shp_vec[2])
+
+        # POD
+        print 'Doing POD analysis'
         modes, eigen_vals, eigen_vecs, correlation_mat = mr.compute_POD_matrices_snaps_method(fields.T,range(M),inner_product_weights=V,return_all=True)
+
+        # if field is a vector, reshape the output matrix
+        if field_is_vector:
+            fields = fields.reshape(shp_vec)
+            modes = np.asarray(modes).T.reshape((modes.shape[1],shp_vec[1],shp_vec[2]))
+            V = V[:shp_vec[1]]
 
         if output_correlation_matrix:
             print "output POD correlation matrix",POD_cm_filename
@@ -118,18 +147,30 @@ def main(argv):
         if output_POD_temporal_modes: 
             print "output POD temporal modes",POD_tm_filename
             # output temporal modes
-            header_str = 'temporal modes\n'
-            header_str += 'time,eigen value,singular value,normalized eigen value,accumulated normalized eigen value'
-            for i in range(N):
-                header_str += ',Mode{}'.format(i)
             singular_vals = eigen_vals**0.5
             POD_mode_energy_normalized = eigen_vals/correlation_mat.trace()[0,0]
+            cumsum_POD_mode_energy_normalized = np.cumsum(POD_mode_energy_normalized)
+            # generate header string
+            header_str = 'temporal modes\n'
+            header_str += 'time,eigen value,singular value,normalized eigen value,accumulated normalized eigen value'
+            for i in range(N-1):
+                header_str += ',Mode{}'.format(i)
+            header_str += '\n'
+            for i in range(N-1):
+                header_str += ',SV ={}'.format(singular_vals[i])
+            header_str += '\n'
+            for i in range(N-1):
+                header_str += ',EV ={}'.format(eigen_vals[i])
+            header_str += '\n'
+            for i in range(N-1):
+                header_str += ',NEnergy ={}'.format(POD_mode_energy_normalized[i])
+            header_str += '\n'
+            for i in range(N-1):
+                header_str += ',CumsumEnergy ={}'.format(cumsum_POD_mode_energy_normalized[i])
+            header_str += '\n'
+
             np.savetxt(POD_tm_filename, \
                         np.c_[times, \
-                            eigen_vals**0.5, \
-                            eigen_vals, \
-                            POD_mode_energy_normalized, \
-                            np.cumsum(POD_mode_energy_normalized), \
                             eigen_vecs], \
                         delimiter = ',', \
                         header = header_str)
@@ -145,7 +186,7 @@ def main(argv):
                 ugcd.RemoveArray(0)
             # import POD mode
             for i in range(M):
-                ugcd.AddArray(dsa.numpyTovtkDataArray(modes[:,i],prefix+'_POD_mode_{}_{}'.format(fieldname,i)))
+                ugcd.AddArray(dsa.numpyTovtkDataArray(modes[i],prefix+'_POD_mode_{}_{}'.format(fieldname,i)))
             # add average field
             ugcd.AddArray(dsa.numpyTovtkDataArray(field_avg,'field_{}_avg'.format(fieldname)))
 
@@ -157,15 +198,28 @@ def main(argv):
         
     if do_DMD:
         print "Begin to calculate DMD modes"
+        # if field is a vector, reshape the fields and corresponding volument weight
+        if field_is_vector:
+            shp_vec = fields.shape
+            shp_flat = (fields.shape[0],fields.shape[1]*fields.shape[2])
+            fields = fields.reshape(shp_flat)
+            V = np.tile(V,shp_vec[2])
+
+        # DMD, I do not know which mode is important, so I have to discard modes_
         modes_, ritz_vals, mode_norms, build_coeffs = mr.compute_DMD_matrices_snaps_method(fields.T,[],inner_product_weights=V,return_all=True)
-        # 排序
+
+        # if field is a vector, reshape the fields, V and output matrix
+        if field_is_vector:
+            fields = fields.reshape(shp_vec)
+            V = V[:shp_vec[1]]
+        # sorting
         eorder = np.argsort(mode_norms)[::-1]
-        # 从大到小
+        # re-order the outputs
         ritz_vals = ritz_vals[eorder]
         mode_norms = mode_norms[eorder]
         build_coeffs = build_coeffs[:,eorder]
         #build the DMD_modes
-        DMD_modes = np.einsum('ij,jk',fields[:-1].T,build_coeffs[:,:M_DMD])
+        DMD_modes = np.einsum('ijk,il->ljk', fields,build_coeffs[:,:M_DMD])
         
         if output_DMD_info:
             print "output DMD info to :",DMD_info_filename
@@ -199,8 +253,8 @@ def main(argv):
             from numpy import pi
             
             for i in range(M_DMD):
-                ugcd.AddArray(dsa.numpyTovtkDataArray(np.abs(DMD_modes[:,i]),prefix+'_DMD_mode_abs_{}_{}'.format(fieldname,i)))
-                ugcd.AddArray(dsa.numpyTovtkDataArray(np.angle(DMD_modes[:,i])*180/pi,prefix+'_DMD_mode_angle_{}_{}'.format(fieldname,i)))
+                ugcd.AddArray(dsa.numpyTovtkDataArray(np.abs(DMD_modes[i]),prefix+'_DMD_mode_abs_{}_{}'.format(fieldname,i)))
+                ugcd.AddArray(dsa.numpyTovtkDataArray(np.angle(DMD_modes[i])*180/pi,prefix+'_DMD_mode_angle_{}_{}'.format(fieldname,i)))
 
 
             ugw = vtk.vtkXMLUnstructuredGridWriter()

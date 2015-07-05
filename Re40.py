@@ -4,15 +4,15 @@
 #####################[IOData]###########################
 # working directory and data filename
 # input directory
-ID="""/home/wei/Wu/VortexStreet/New/40cylinder13Wrerun/"""
+ID="""/home/centfoam/Wu/Vortex/40cylinder13Wrerun/"""
 # input .foam file
-IF="""100cylinder13W.foam"""
+IF="""40cylinder13Wrerun.foam"""
 # output directory
-OD="""/media/foamdisk/catdog/vtkPOD/vortex_street_pod/Re40/"""
+OD="""/home/centfoam/Wu/Vortex/POD_output/Re40/"""
 #start time
-t0=9
+t0=2
 # end time
-tf=10
+tf=3
 # name of field to be decomposed
 fieldname = "U"
 # vector or not
@@ -51,6 +51,7 @@ POD_sm_filename="""{}POD_spatial_modes.vtu""".format(OD)
 doReconstruction = True
 # reconstruct output numbers
 MR=10 
+ReconTime= (t0+tf)/2.0
 POD_reconstruction_filename="""{}POD_reconstruction.vtu""".format(OD)
 
 #####################[DMD]###########################

@@ -8,17 +8,17 @@ ID="""/home/centfoam/Wu/Vortex/100cylinder13Wrerun/"""
 # input .foam file
 IF="""100cylinder13Wrerun.foam"""
 # output directory
-OD="""/home/centfoam/Wu/Vortex/POD_output/Re100/"""
+OD="""/home/centfoam/Wu/Vortex/POD_output/Re100_p/"""
 #start time
 t0=7
 # end time
 tf=9
 # name of field to be decomposed
-fieldname = "U"
+fieldname = "p"
 # vector or not
-field_is_vector = True
+field_is_vector = False
 # prefix of spatial modes' name
-prefix="Re100_"
+prefix="Re100_p_"
 # True= read data from case files; 
 # False= read data from fields.npz
 read_fields_from_file=False

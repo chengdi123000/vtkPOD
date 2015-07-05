@@ -14,7 +14,7 @@ def main(argv):
     import os
     if not os.path.exists(OD):
         os.makedirs(OD)
-        
+    print '!!!Output to DIR: ',OD    
 
     if not read_fields_from_file:    
 
@@ -23,6 +23,7 @@ def main(argv):
         ofr = vtk.vtkPOpenFOAMReader()
         # set reader's options 
         ofr.SetFileName(ID+IF)
+	print '!!!open file: ',ID+IF
         ofr.SetDecomposePolyhedra(0)
         ofr.CacheMeshOn()
         ofr.SetCreateCellToPoint(0)
@@ -34,6 +35,7 @@ def main(argv):
         times = dsa.vtkDataArrayToVTKArray( ofr.GetTimeValues() ,ofr)
         # select the timestep between t0 and tf
         times = [t for t in times if t>=t0 and t<=tf]
+	print '!!!available time steps: ',times
         N = len(times)
         np.save(times_filename,times)
 
@@ -60,7 +62,7 @@ def main(argv):
         # using *.vtu file format to save the vol_weight
         ugw = vtk.vtkXMLUnstructuredGridWriter()
         ugw.SetInputDataObject(geom)
-        print 'Output vol_weight to file: ',geom_filename
+        print '!!!Output vol_weight to file: ',geom_filename
         ugw.SetFileName(geom_filename)
         # using binary format
         ugw.SetDataModeToBinary()
@@ -81,20 +83,20 @@ def main(argv):
         pipepout = ofr
         for i in range(N):
             t = times[i]
-            print 'reading time:{}'.format(t)
+            print '!!!reading time:{}'.format(t)
             # set time value
             pipepout.GetOutputInformation(0).Set(vtk.vtkStreamingDemandDrivenPipeline.UPDATE_TIME_STEP(),t)
             # read in field data of new timestep
             pipepout.Update()
             # 
             d = dsa.WrapDataObject(pipepout.GetOutput().GetBlock(0))
-            print 'reading field:{}'.format(fieldname)
+            print '!!!reading field:{}'.format(fieldname)
             field = d.CellData[fieldname]
             # get the first component of composite dataset, it is the internalField
             fields[i]=np.copy(field)
 
         # write data to file
-        print 'write field data to file:',fields_filename
+        print '!!!write field data to file:',fields_filename
         np.savez(fields_filename,fields)
     else: #read fields from file
         fields = np.load(fields_filename)['arr_0']
@@ -131,7 +133,7 @@ def main(argv):
             V = np.tile(V,shp_vec[2])
 
         # POD
-        print 'Doing POD analysis'
+        print '!!!Doing POD analysis'
         modes, eigen_vals, eigen_vecs, correlation_mat = mr.compute_POD_matrices_snaps_method(fields.T,range(M),inner_product_weights=V,return_all=True)
 
         # if field is a vector, reshape the output matrix
@@ -141,11 +143,11 @@ def main(argv):
             V = V[:shp_vec[1]]
 
         if output_correlation_matrix:
-            print "output POD correlation matrix",POD_cm_filename
+            print "!!!output POD correlation matrix",POD_cm_filename
             np.savetxt(POD_cm_filename,correlation_mat,delimiter=',')
 
         if output_POD_temporal_modes: 
-            print "output POD temporal modes",POD_tm_filename
+            print "!!!output POD temporal modes",POD_tm_filename
             # output temporal modes
             singular_vals = eigen_vals**0.5
             POD_mode_energy_normalized = eigen_vals/correlation_mat.trace()[0,0]
@@ -177,7 +179,7 @@ def main(argv):
             
 
         if output_POD_spatial_modes:
-            print "output POD spatial Modes to ",POD_sm_filename
+            print "!!!output POD spatial Modes to ",POD_sm_filename
             #output to xml vtk unstructured grid file
             ugcd = geom.GetCellData()
             ugcd.Reset()
@@ -194,10 +196,27 @@ def main(argv):
             ugw.SetInputDataObject(geom)
             ugw.SetFileName(POD_sm_filename)
             ugw.Write()
+        if doReconstruction:
+            print "!!! do Reconstrution with {} POD modes at time {}".format(MR,ReconTime)
+            #get an empty mesh
+            ugcd = geom.GetCellData()
+            ugcd.Reset()
+            ugcd.CopyAllOff()
+            for i in range(ugcd.GetNumberOfArrays()):
+                ugcd.RemoveArray(0)
+            # reconstruct from first MR POD modes
+            # 
+            ReconN = np.searchsorted(times,ReconTime)
+            print "!!!actually, reconstruction is done at time {} rather than time {}".format(times[ReconN],ReconTime)
+            recon_field = np.einsum("i...,i,i",modes[:MR],eigen_vals[:MR]**0.5,np.asarray(eigen_vecs)[ReconN,:MR])+field_avg;
+            ugcd.AddArray(dsa.numpyTovtkDataArray(recon_field,prefix+'_POD_{}_Reconstructed_{}_{}'.format(MR,fieldname,ReconTime)))
 
-        
+            ugw = vtk.vtkXMLUnstructuredGridWriter()
+            ugw.SetInputDataObject(geom)
+            ugw.SetFileName(POD_reconstruction_filename)
+            ugw.Write()
     if do_DMD:
-        print "Begin to calculate DMD modes"
+        print "!!!Begin to calculate DMD modes"
         # if field is a vector, reshape the fields and corresponding volument weight
         if field_is_vector:
             shp_vec = fields.shape
@@ -222,7 +241,7 @@ def main(argv):
         DMD_modes = np.einsum('ijk,il->ljk', fields,build_coeffs[:,:M_DMD])
         
         if output_DMD_info:
-            print "output DMD info to :",DMD_info_filename
+            print "!!!output DMD info to :",DMD_info_filename
             # output modes info
             header_str = 'DMD modes info\n'
             header_str += 'ritz_vals.real,ritz_vals.imag,growth_rate, frequency, mode_norms\n'
@@ -238,11 +257,11 @@ def main(argv):
                         header = header_str) 
 
         if output_DMD_build_coeffs:
-            print "output DMD build coeffs. to :",DMD_build_coeffs_filename
+            print "!!!output DMD build coeffs. to :",DMD_build_coeffs_filename
             np.savez(DMD_build_coeffs_filename, build_coeffs)
             
         if output_DMD_spatial_modes:
-            print "output DMD info to :",DMD_sm_filename
+            print "!!!output DMD info to :",DMD_sm_filename
             #output to xml vtk unstructured grid file
             ugcd = geom.GetCellData()
             ugcd.Reset()

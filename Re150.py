@@ -4,15 +4,15 @@
 #####################[IOData]###########################
 # working directory and data filename
 # input directory
-ID="""/home/wei/Wu/VortexStreet/New/150cylinder13Wrerun/"""
+ID="""/home/centfoam/Wu/Vortex/150cylinder13Wrerun/"""
 # input .foam file
-IF="""150cylinder13W.foam"""
+IF="""150cylinder13Wrerun.foam"""
 # output directory
-OD="""/media/foamdisk/catdog/vtkPOD/vortex_street_pod/Re150/"""
+OD="""/home/centfoam/Wu/Vortex/POD_output/Re150/"""
 #start time
-t0=9
+t0=7
 # end time
-tf=10
+tf=9
 # name of field to be decomposed
 fieldname = "U"
 # vector or not
